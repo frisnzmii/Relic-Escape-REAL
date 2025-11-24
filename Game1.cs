@@ -9,7 +9,7 @@ namespace RelicEscape
 {
     // Enums
     public enum TileType { Grass, Tree, Water, Stone, Chest, Exit }
-    public enum EntityState { Idle, Walking, Attacking, Dead }
+    public enum EntityState { Idle, Walking, Attacking, Dead, Hurt }
     public enum EnemyType { Snake, Spider }
     public enum GameState { Playing, GameOver, Cutscene }
 
@@ -62,6 +62,7 @@ namespace RelicEscape
         public RelicItem CurrentWeapon;
         public bool HasDealtDamageThisAttack;
         public SpriteEffects FacingDirection;
+        public float HurtTimer = 0f;
 
         public Player(Vector2 startPos)
         {
@@ -85,6 +86,18 @@ namespace RelicEscape
             if (State == EntityState.Dead) return;
 
             if (AttackCooldown > 0) AttackCooldown -= deltaTime;
+
+            if (HurtTimer > 0)
+            {
+                HurtTimer -= deltaTime;
+                if (HurtTimer <= 0)
+                {
+                    State = EntityState.Idle;  
+                }
+            }
+
+        
+            if (State == EntityState.Hurt) return;
 
             Vector2 movement = Vector2.Zero;
             if (keyState.IsKeyDown(Keys.W) || keyState.IsKeyDown(Keys.Up)) movement.Y -= 1;
@@ -126,7 +139,16 @@ namespace RelicEscape
         public void TakeDamage(int damage)
         {
             Health -= damage;
-            if (Health <= 0) { Health = 0; State = EntityState.Dead; }
+            if (Health <= 0)
+            {
+                Health = 0;
+                State = EntityState.Dead;
+            }
+            else
+            {
+                State = EntityState.Hurt;  
+                HurtTimer = 0.3f;  
+            }
         }
 
         public void AddToInventory(string item) => Inventory.Add(item);
@@ -270,7 +292,7 @@ namespace RelicEscape
 
         private int snakesKilled = 0, spidersKilled = 0;
         private bool hasRelicBlade = false, vineIsPushed = false;
-        private float enemyRespawnTimer = 0f, enemyRespawnDelay = 30f;
+        private float enemyRespawnTimer = 0f, enemyRespawnDelay = 10f; 
         private KeyboardState prevKeyState;
 
         private string cutsceneText = "Forward to the Sands of Remembrance";
@@ -288,7 +310,7 @@ namespace RelicEscape
         private Texture2D playerIdleTexture;
         private Texture2D playerWalkTexture;
         private Texture2D playerAttackTexture;
-
+        private Texture2D playerHurtTexture;
         // Enemy sprites
         private Texture2D snakeTexture;
         private Texture2D spiderTexture;
@@ -369,19 +391,21 @@ namespace RelicEscape
             map[14, 13] = TileType.Exit;
         }
 
-        private void InitializePlayer() => player = new Player(new Vector2(tileSize * 2, tileSize * 2));
+        private void InitializePlayer()
+        {
+            player = new Player(new Vector2(tileSize * 2, tileSize * 2));
+
+            // Show instruction at start
+            ShowMessage("Kill the snake first, you will know why...");
+        }
 
         private void InitializeEnemies()
         {
             enemies = new List<Enemy>
-            {
-                new Enemy(new Vector2(tileSize * 4, tileSize * 5), EnemyType.Snake, true),
-                new Enemy(new Vector2(tileSize * 8, tileSize * 4), EnemyType.Snake, true),
-                new Enemy(new Vector2(tileSize * 6, tileSize * 8), EnemyType.Snake, true),
-                new Enemy(new Vector2(tileSize * 10, tileSize * 6), EnemyType.Spider, true),
-                new Enemy(new Vector2(tileSize * 5, tileSize * 12), EnemyType.Spider, true),
-                new Enemy(new Vector2(tileSize * 11, tileSize * 12), EnemyType.Spider, true)
-            };
+    {
+        new Enemy(new Vector2(tileSize * 6, tileSize * 5), EnemyType.Snake, true),
+        new Enemy(new Vector2(tileSize * 10, tileSize * 6), EnemyType.Spider, true)
+    };
         }
 
         private void InitializeObjects()
@@ -409,6 +433,7 @@ namespace RelicEscape
                 playerIdleTexture = Content.Load<Texture2D>("player_idle");
                 playerWalkTexture = Content.Load<Texture2D>("player_walk");
                 playerAttackTexture = Content.Load<Texture2D>("player_attack");
+                playerHurtTexture = Content.Load<Texture2D>("player_hurt");
 
                 // Enemy sprites
                 snakeTexture = Content.Load<Texture2D>("snake");
@@ -634,27 +659,32 @@ namespace RelicEscape
 
                     if (enemy.State == EntityState.Dead && enemy.DropsKey)
                     {
+                        // Simple alternating: Snake → Spider → Snake
                         bool shouldDropKey = false;
 
-                        if (enemy.Type == EnemyType.Snake && snakesKilled == 0 && player.GetKeyCount() == 0)
-                        { shouldDropKey = true; snakesKilled++; }
-                        else if (enemy.Type == EnemyType.Spider && spidersKilled == 0 && player.GetKeyCount() == 1)
-                        { shouldDropKey = true; spidersKilled++; }
-                        else if (enemy.Type == EnemyType.Snake && snakesKilled == 1 && player.GetKeyCount() == 2)
-                        { shouldDropKey = true; snakesKilled++; }
+                        if (enemy.Type == EnemyType.Snake && player.GetKeyCount() == 0)
+                        {
+                            shouldDropKey = true;
+                        }
+                        else if (enemy.Type == EnemyType.Spider && player.GetKeyCount() == 1)
+                        {
+                            shouldDropKey = true;
+                        }
+                        else if (enemy.Type == EnemyType.Snake && player.GetKeyCount() == 2)
+                        {
+                            shouldDropKey = true;
+                        }
 
                         if (shouldDropKey)
                         {
                             itemDrops.Add(new ItemDrop(enemy.Position, "Key"));
                             enemy.DropsKey = false;
-                            ShowMessage("Key dropped! Press E to pick up");
+                            ShowMessage($"Key dropped! Press E to pick up ({player.GetKeyCount()}/3 keys)");
                         }
                     }
-                    break;
                 }
             }
         }
-
         private void CheckItemPickups()
         {
             for (int i = itemDrops.Count - 1; i >= 0; i--)
@@ -695,7 +725,7 @@ namespace RelicEscape
                     obj.IsActivated = true;
                     vineIsPushed = true;
                     map[2, 10] = TileType.Stone;
-                    ShowMessage("Vine pushed! Bridge created!");
+                    ShowMessage("Stone pushed! Bridge created!");
                 }
 
                 if (obj.Type == "Chest" && !obj.IsActivated && distance < 60f)
@@ -730,6 +760,7 @@ namespace RelicEscape
                 enemy.Position = new Vector2(x * tileSize, y * tileSize);
                 enemy.Health = enemy.MaxHealth;
                 enemy.State = EntityState.Idle;
+                enemy.DropsKey = true;
             }
         }
 
@@ -867,6 +898,26 @@ namespace RelicEscape
 
         private void DrawMap()
         {
+            // STEP 1: Draw ALL grass tiles first as background
+            for (int x = 0; x < mapWidth; x++)
+            {
+                for (int y = 0; y < mapHeight; y++)
+                {
+                    Rectangle tileRect = new Rectangle(x * tileSize, y * tileSize, tileSize, tileSize);
+
+                    // Always draw grass as base layer
+                    if (spritesLoaded && grassTexture != null)
+                    {
+                        spriteBatch.Draw(grassTexture, tileRect, Color.White);
+                    }
+                    else
+                    {
+                        spriteBatch.Draw(pixelTexture, tileRect, Color.ForestGreen);
+                    }
+                }
+            }
+
+            // STEP 2: Draw special tiles ON TOP of grass
             for (int x = 0; x < mapWidth; x++)
             {
                 for (int y = 0; y < mapHeight; y++)
@@ -874,27 +925,30 @@ namespace RelicEscape
                     Rectangle tileRect = new Rectangle(x * tileSize, y * tileSize, tileSize, tileSize);
                     TileType tile = map[x, y];
 
+                    // Skip grass (already drawn)
+                    if (tile == TileType.Grass || tile == TileType.Chest) continue;
+
                     if (spritesLoaded)
                     {
-                        // USE SPRITES
-                        Texture2D tileTexture = grassTexture;
+                        Texture2D tileTexture = null;
                         switch (tile)
                         {
-                            case TileType.Grass: tileTexture = grassTexture; break;
                             case TileType.Tree: tileTexture = treeTexture; break;
                             case TileType.Water: tileTexture = waterTexture; break;
                             case TileType.Stone: tileTexture = stoneTexture; break;
-                            case TileType.Chest: tileTexture = grassTexture; break;
                             case TileType.Exit: tileTexture = exitTexture; break;
                         }
-                        spriteBatch.Draw(tileTexture, tileRect, Color.White);
+
+                        if (tileTexture != null)
+                        {
+                            spriteBatch.Draw(tileTexture, tileRect, Color.White);
+                        }
                     }
                     else
                     {
                         // FALLBACK: Colored rectangles
                         Color tileColor = tile switch
                         {
-                            TileType.Grass => Color.ForestGreen,
                             TileType.Tree => Color.SaddleBrown,
                             TileType.Water => Color.DodgerBlue,
                             TileType.Stone => Color.Gray,
@@ -987,13 +1041,42 @@ namespace RelicEscape
 
             if (spritesLoaded)
             {
-                Texture2D playerTex = player.IsAttacking ? playerAttackTexture :
-                                      player.State == EntityState.Walking ? playerWalkTexture : playerIdleTexture;
-                spriteBatch.Draw(playerTex, player.Bounds, null, Color.White, 0f, Vector2.Zero, player.FacingDirection, 0f);
+                Texture2D playerTex;
+
+                if (player.State == EntityState.Hurt && playerHurtTexture != null)
+                {
+                    playerTex = playerHurtTexture;  // ← Show hurt sprite!
+                }
+                else if (player.IsAttacking && playerAttackTexture != null)
+                {
+                    playerTex = playerAttackTexture;
+                }
+                else if (player.State == EntityState.Walking && playerWalkTexture != null)
+                {
+                    playerTex = playerWalkTexture;
+                }
+                else
+                {
+                    playerTex = playerIdleTexture;
+                }
+
+                if (playerTex != null)
+                {
+                    spriteBatch.Draw(playerTex, player.Bounds, null, Color.White, 0f, Vector2.Zero, player.FacingDirection, 0f);
+                }
+                else
+                {
+                    // Fallback - flash red if hurt
+                    Color playerColor = player.State == EntityState.Hurt ? Color.Red : Color.Blue;
+                    spriteBatch.Draw(pixelTexture, player.Bounds, playerColor);
+                    DrawRect(player.Bounds, Color.White, 2);
+                }
             }
             else
             {
-                spriteBatch.Draw(pixelTexture, player.Bounds, Color.Blue);
+                // Fallback - flash red if hurt
+                Color playerColor = player.State == EntityState.Hurt ? Color.Red : Color.Blue;
+                spriteBatch.Draw(pixelTexture, player.Bounds, playerColor);
                 DrawRect(player.Bounds, Color.White, 2);
             }
 
@@ -1074,4 +1157,5 @@ namespace RelicEscape
             spriteBatch.Draw(pixelTexture, new Rectangle(rect.Right - w, rect.Y, w, rect.Height), color);
         }
     }
+
 }
